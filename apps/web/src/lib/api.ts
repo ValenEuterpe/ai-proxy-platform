@@ -235,9 +235,14 @@ export type Settings = {
 	discord_cmd_stats_ephemeral?: boolean
 	discord_cmd_assignrole_channel_id?: string | null
 	discord_cmd_assignrole_role_id?: string | null
-	/** Website roles.id UUID assigned via /assignrole (not a Discord role) */
+	/** @deprecated Role chosen per /assignrole via Discord option */
 	discord_cmd_assignrole_target_role_id?: string | null
+	/** Website role UUIDs excluded from /assignrole */
+	discord_cmd_assignrole_excluded_role_ids?: string[]
 	discord_cmd_assignrole_ephemeral?: boolean
+	discord_cmd_rolelist_channel_id?: string | null
+	discord_cmd_rolelist_role_id?: string | null
+	discord_cmd_rolelist_ephemeral?: boolean
 	updated_at?: string
 }
 
@@ -541,6 +546,7 @@ export const api = {
 			ok: boolean
 			count: number
 			guild_id: string
+			role_choices: number
 			commands: string[]
 		}>('/api/admin/discord/register-commands', {
 			method: 'POST',

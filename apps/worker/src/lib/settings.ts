@@ -23,12 +23,14 @@ export type Settings = {
 	discord_cmd_stats_ephemeral: boolean
 	discord_cmd_assignrole_channel_id: string | null
 	discord_cmd_assignrole_role_id: string | null
-	/**
-	 * Website role (roles.id UUID) assigned to app_users when /assignrole succeeds.
-	 * Not a Discord role snowflake.
-	 */
+	/** @deprecated Role is chosen per /assignrole invocation via the `role` option. */
 	discord_cmd_assignrole_target_role_id: string | null
+	/** Website role UUIDs that cannot be assigned via /assignrole. */
+	discord_cmd_assignrole_excluded_role_ids: string[]
 	discord_cmd_assignrole_ephemeral: boolean
+	discord_cmd_rolelist_channel_id: string | null
+	discord_cmd_rolelist_role_id: string | null
+	discord_cmd_rolelist_ephemeral: boolean
 }
 
 type CacheEntry = { value: Settings; expiresAt: number }
@@ -52,7 +54,24 @@ const defaults: Settings = {
 	discord_cmd_assignrole_channel_id: null,
 	discord_cmd_assignrole_role_id: null,
 	discord_cmd_assignrole_target_role_id: null,
+	discord_cmd_assignrole_excluded_role_ids: [],
 	discord_cmd_assignrole_ephemeral: true,
+	discord_cmd_rolelist_channel_id: null,
+	discord_cmd_rolelist_role_id: null,
+	discord_cmd_rolelist_ephemeral: true,
+}
+
+function parseUuidList(v: unknown): string[] {
+	if (!Array.isArray(v)) return []
+	const out: string[] = []
+	const re =
+		/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+	for (const item of v) {
+		if (typeof item !== 'string') continue
+		const id = item.trim()
+		if (re.test(id) && !out.includes(id)) out.push(id)
+	}
+	return out
 }
 
 function parseCsamAction(v: unknown): CsamAction {
@@ -99,11 +118,21 @@ export async function getSettings(db: SupabaseClient): Promise<Settings> {
 		discord_cmd_assignrole_target_role_id: emptyToNull(
 			data.discord_cmd_assignrole_target_role_id,
 		),
+		discord_cmd_assignrole_excluded_role_ids: parseUuidList(
+			data.discord_cmd_assignrole_excluded_role_ids,
+		),
 		discord_cmd_assignrole_ephemeral:
 			data.discord_cmd_assignrole_ephemeral === undefined ||
 			data.discord_cmd_assignrole_ephemeral === null
 				? true
 				: Boolean(data.discord_cmd_assignrole_ephemeral),
+		discord_cmd_rolelist_channel_id: emptyToNull(data.discord_cmd_rolelist_channel_id),
+		discord_cmd_rolelist_role_id: emptyToNull(data.discord_cmd_rolelist_role_id),
+		discord_cmd_rolelist_ephemeral:
+			data.discord_cmd_rolelist_ephemeral === undefined ||
+			data.discord_cmd_rolelist_ephemeral === null
+				? true
+				: Boolean(data.discord_cmd_rolelist_ephemeral),
 	}
 	cache = { value, expiresAt: now + TTL_MS }
 	return value

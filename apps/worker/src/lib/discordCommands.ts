@@ -5,7 +5,7 @@ import {
 	getWindowUsage,
 	sumUserTokens,
 } from './rateLimit'
-import { getRoleById, getUserRoleLimits } from './roles'
+import { getRoleById, getUserRoleLimits, listRoles } from './roles'
 import type { Settings } from './settings'
 
 export type InteractionMember = {
@@ -44,6 +44,8 @@ export type DiscordInteraction = {
 
 const FLAG_EPHEMERAL = 64
 
+export type CommandKind = 'stats' | 'assignrole' | 'rolelist'
+
 export function messageResponse(content: string, ephemeral: boolean) {
 	return {
 		type: 4, // CHANNEL_MESSAGE_WITH_SOURCE
@@ -58,19 +60,25 @@ function snowflakeOk(id: string | null | undefined): id is string {
 	return typeof id === 'string' && /^\d{5,30}$/.test(id.trim())
 }
 
-/** Channel + role gates for a command. Returns error message or null if ok. */
+/** Channel + Discord-role gates for a command. Returns error message or null if ok. */
 export function checkCommandGates(
 	settings: Settings,
-	kind: 'stats' | 'assignrole',
+	kind: CommandKind,
 	channelId: string | undefined,
 	memberRoles: string[] | undefined,
 ): string | null {
-	const channelGate =
-		kind === 'stats'
-			? settings.discord_cmd_stats_channel_id
-			: settings.discord_cmd_assignrole_channel_id
-	const roleGate =
-		kind === 'stats' ? settings.discord_cmd_stats_role_id : settings.discord_cmd_assignrole_role_id
+	let channelGate: string | null = null
+	let roleGate: string | null = null
+	if (kind === 'stats') {
+		channelGate = settings.discord_cmd_stats_channel_id
+		roleGate = settings.discord_cmd_stats_role_id
+	} else if (kind === 'assignrole') {
+		channelGate = settings.discord_cmd_assignrole_channel_id
+		roleGate = settings.discord_cmd_assignrole_role_id
+	} else {
+		channelGate = settings.discord_cmd_rolelist_channel_id
+		roleGate = settings.discord_cmd_rolelist_role_id
+	}
 
 	if (snowflakeOk(channelGate)) {
 		if (!channelId || channelId !== channelGate.trim()) {
@@ -99,10 +107,14 @@ function optionUserId(data: InteractionData | undefined, name: string): string |
 	return snowflakeOk(v) ? v : null
 }
 
-function resolveUserLabel(
-	data: InteractionData | undefined,
-	userId: string,
-): string {
+function optionString(data: InteractionData | undefined, name: string): string | null {
+	const opt = data?.options?.find((o) => o.name === name)
+	if (!opt || opt.value === undefined || opt.value === null) return null
+	const v = String(opt.value).trim()
+	return v === '' ? null : v
+}
+
+function resolveUserLabel(data: InteractionData | undefined, userId: string): string {
 	const u = data?.resolved?.users?.[userId]
 	if (u?.global_name) return u.global_name
 	if (u?.username) return u.username
@@ -112,6 +124,10 @@ function resolveUserLabel(
 function fmtLimit(used: number, limit: number | null): string {
 	if (limit == null) return `${used} / ∞`
 	return `${used} / ${limit}`
+}
+
+function fmtCap(limit: number | null): string {
+	return limit == null ? '∞' : String(limit)
 }
 
 async function formatUserStats(
@@ -176,8 +192,7 @@ export async function handleStatsCommand(
 	)
 	if (gate) return messageResponse(gate, true)
 
-	const targetId =
-		optionUserId(interaction.data, 'user') ?? invokerUserId(interaction)
+	const targetId = optionUserId(interaction.data, 'user') ?? invokerUserId(interaction)
 	if (!targetId) {
 		return messageResponse('Could not determine the Discord user.', true)
 	}
@@ -228,7 +243,7 @@ const UUID_RE =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 /**
- * /assignrole — sets website app_users.role_id (proxy limits/access), not a Discord server role.
+ * /assignrole — sets website app_users.role_id from the `role` option (always overrides).
  */
 export async function handleAssignRoleCommand(
 	db: SupabaseClient,
@@ -248,24 +263,32 @@ export async function handleAssignRoleCommand(
 		return messageResponse('This command can only be used in a server.', true)
 	}
 
-	const targetRoleId = settings.discord_cmd_assignrole_target_role_id?.trim() || null
-	if (!targetRoleId || !UUID_RE.test(targetRoleId)) {
+	const roleArg = optionString(interaction.data, 'role')
+	if (!roleArg || !UUID_RE.test(roleArg)) {
 		return messageResponse(
-			'Website target role is not configured. Set it in Admin → Settings → Discord Commands (dropdown of site roles).',
+			'Pick a website role from the `role` option. If the list is empty, open Admin → Settings → Register slash commands after creating roles.',
 			true,
 		)
 	}
 
 	let targetRole: Awaited<ReturnType<typeof getRoleById>>
 	try {
-		targetRole = await getRoleById(db, targetRoleId)
+		targetRole = await getRoleById(db, roleArg)
 	} catch (e) {
 		console.error('assignrole getRoleById', e)
 		return messageResponse('Failed to load website role. Try again later.', true)
 	}
 	if (!targetRole) {
 		return messageResponse(
-			'Configured website role no longer exists. Pick another role in Admin → Settings.',
+			'That website role no longer exists. Re-register slash commands after updating roles.',
+			true,
+		)
+	}
+
+	const excluded = settings.discord_cmd_assignrole_excluded_role_ids ?? []
+	if (excluded.includes(targetRole.id)) {
+		return messageResponse(
+			`Website role **${targetRole.name}** is excluded from /assignrole. Pick another role.`,
 			true,
 		)
 	}
@@ -300,11 +323,18 @@ export async function handleAssignRoleCommand(
 			continue
 		}
 
-		if ((appUser.role_id as string | null) === targetRole.id) {
-			lines.push(`✅ ${label} — already has website role **${targetRole.name}**`)
-			continue
+		const prevRoleId = (appUser.role_id as string | null) ?? null
+		let prevName: string | null = null
+		if (prevRoleId && prevRoleId !== targetRole.id) {
+			try {
+				const prev = await getRoleById(db, prevRoleId)
+				prevName = prev?.name ?? null
+			} catch {
+				prevName = null
+			}
 		}
 
+		// Always write role_id so re-running the command overrides (or re-applies) the role.
 		const { error: updErr } = await db
 			.from('app_users')
 			.update({ role_id: targetRole.id })
@@ -315,8 +345,66 @@ export async function handleAssignRoleCommand(
 			lines.push(`❌ ${label} — failed to update role`)
 			continue
 		}
-		lines.push(`✅ ${label} — website role set to **${targetRole.name}**`)
+
+		if (prevRoleId === targetRole.id) {
+			lines.push(`✅ ${label} — website role set to **${targetRole.name}** (unchanged)`)
+		} else if (prevName) {
+			lines.push(
+				`✅ ${label} — website role **${prevName}** → **${targetRole.name}**`,
+			)
+		} else {
+			lines.push(`✅ ${label} — website role set to **${targetRole.name}**`)
+		}
 	}
 
 	return messageResponse(lines.join('\n'), ephemeral)
+}
+
+/**
+ * /rolelist — list website roles with RPM / RPD / TPM / TPD.
+ */
+export async function handleRoleListCommand(
+	db: SupabaseClient,
+	settings: Settings,
+	interaction: DiscordInteraction,
+): Promise<ReturnType<typeof messageResponse>> {
+	const ephemeral = settings.discord_cmd_rolelist_ephemeral
+	const gate = checkCommandGates(
+		settings,
+		'rolelist',
+		interaction.channel_id,
+		interaction.member?.roles,
+	)
+	if (gate) return messageResponse(gate, true)
+
+	try {
+		const roles = await listRoles(db)
+		if (roles.length === 0) {
+			return messageResponse('No website roles configured yet.', ephemeral)
+		}
+
+		const lines = [
+			'**Website proxy roles**',
+			'`RPM` requests/min · `RPD` requests/day · `TPM` tokens/min · `TPD` tokens/day',
+			'',
+		]
+
+		for (const r of roles) {
+			const def = r.is_default ? ' · *default*' : ''
+			lines.push(
+				`**${r.name}**${def}`,
+				`RPM \`${fmtCap(r.requests_per_minute)}\` · RPD \`${fmtCap(r.requests_per_day)}\` · TPM \`${fmtCap(r.tokens_per_minute)}\` · TPD \`${fmtCap(r.tokens_per_day)}\``,
+			)
+		}
+
+		const text = lines.join('\n')
+		// Discord message limit 2000
+		if (text.length > 1900) {
+			return messageResponse(text.slice(0, 1900) + '\n…', ephemeral)
+		}
+		return messageResponse(text, ephemeral)
+	} catch (e) {
+		console.error('rolelist', e)
+		return messageResponse('Failed to load roles. Try again later.', true)
+	}
 }

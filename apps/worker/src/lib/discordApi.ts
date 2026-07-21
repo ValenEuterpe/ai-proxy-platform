@@ -1,24 +1,64 @@
 /**
- * Discord REST helpers for slash-command registration and role assignment.
+ * Discord REST helpers for slash-command registration.
  */
 
 const API = 'https://discord.com/api/v10'
 
+export type DiscordCommandChoice = {
+	name: string
+	value: string
+}
+
+export type DiscordCommandOption = {
+	type: number
+	name: string
+	description: string
+	required?: boolean
+	choices?: DiscordCommandChoice[]
+}
+
 export type DiscordCommandDef = {
 	name: string
 	description: string
-	options?: {
-		type: number
-		name: string
-		description: string
-		required?: boolean
-	}[]
+	options?: DiscordCommandOption[]
 }
 
-/** Slash command option type USER */
+/** Slash command option types */
+export const OPT_STRING = 3
 export const OPT_USER = 6
 
-export function defaultCommandDefinitions(): DiscordCommandDef[] {
+/** Discord allows max 25 choices per option. */
+const MAX_CHOICES = 25
+
+export type RoleChoiceSource = { id: string; name: string }
+
+/**
+ * Build guild command definitions.
+ * `websiteRoles` populates /assignrole `role` choices (value = roles.id UUID).
+ */
+export function buildCommandDefinitions(
+	websiteRoles: RoleChoiceSource[] = [],
+): DiscordCommandDef[] {
+	const choices: DiscordCommandChoice[] = websiteRoles.slice(0, MAX_CHOICES).map((r) => ({
+		name: r.name.slice(0, 100) || r.id.slice(0, 100),
+		value: r.id,
+	}))
+
+	const assignOptions: DiscordCommandOption[] = [
+		{
+			type: OPT_STRING,
+			name: 'role',
+			description: 'Website proxy role to assign (from Admin → Roles)',
+			required: true,
+			...(choices.length > 0 ? { choices } : {}),
+		},
+		{ type: OPT_USER, name: 'user1', description: 'First user', required: true },
+		{ type: OPT_USER, name: 'user2', description: 'Second user', required: false },
+		{ type: OPT_USER, name: 'user3', description: 'Third user', required: false },
+		{ type: OPT_USER, name: 'user4', description: 'Fourth user', required: false },
+		{ type: OPT_USER, name: 'user5', description: 'Fifth user', required: false },
+	]
+
 	return [
 		{
 			name: 'stats',
@@ -34,14 +74,12 @@ export function defaultCommandDefinitions(): DiscordCommandDef[] {
 		},
 		{
 			name: 'assignrole',
-			description: 'Assign the configured website proxy role to up to 5 registered users',
-			options: [
-				{ type: OPT_USER, name: 'user1', description: 'First user', required: true },
-				{ type: OPT_USER, name: 'user2', description: 'Second user', required: false },
-				{ type: OPT_USER, name: 'user3', description: 'Third user', required: false },
-				{ type: OPT_USER, name: 'user4', description: 'Fourth user', required: false },
-				{ type: OPT_USER, name: 'user5', description: 'Fifth user', required: false },
-			],
+			description: 'Assign a website proxy role to up to 5 registered users (overrides previous)',
+			options: assignOptions,
+		},
+		{
+			name: 'rolelist',
+			description: 'List website proxy roles and their RPM / RPD / TPM / TPD limits',
 		},
 	]
 }
@@ -50,7 +88,7 @@ export async function registerGuildCommands(
 	botToken: string,
 	applicationId: string,
 	guildId: string,
-	commands: DiscordCommandDef[] = defaultCommandDefinitions(),
+	commands: DiscordCommandDef[],
 ): Promise<{ ok: true; count: number } | { ok: false; status: number; body: string }> {
 	const url = `${API}/applications/${encodeURIComponent(applicationId)}/guilds/${encodeURIComponent(guildId)}/commands`
 	const res = await fetch(url, {
@@ -73,40 +111,4 @@ export async function registerGuildCommands(
 		/* ignore */
 	}
 	return { ok: true, count }
-}
-
-/**
- * PUT /guilds/{guild.id}/members/{user.id}/roles/{role.id}
- * 204 = success; 204 also when already has role in practice Discord returns 204.
- */
-export async function addGuildMemberRole(
-	botToken: string,
-	guildId: string,
-	userId: string,
-	roleId: string,
-): Promise<{ ok: true } | { ok: false; status: number; message: string }> {
-	const url = `${API}/guilds/${encodeURIComponent(guildId)}/members/${encodeURIComponent(userId)}/roles/${encodeURIComponent(roleId)}`
-	try {
-		const res = await fetch(url, {
-			method: 'PUT',
-			headers: {
-				Authorization: `Bot ${botToken.trim()}`,
-				'Content-Type': 'application/json',
-				'X-Audit-Log-Reason': 'assignrole slash command',
-			},
-		})
-		if (res.status === 204 || res.status === 200) return { ok: true }
-		const body = await res.text().catch(() => '')
-		return {
-			ok: false,
-			status: res.status,
-			message: body.slice(0, 300) || `HTTP ${res.status}`,
-		}
-	} catch (e) {
-		return {
-			ok: false,
-			status: 0,
-			message: e instanceof Error ? e.message : String(e),
-		}
-	}
 }

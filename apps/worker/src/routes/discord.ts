@@ -1,13 +1,15 @@
 import { Hono } from 'hono'
 import { createServiceClient } from '../lib/db'
-import { registerGuildCommands } from '../lib/discordApi'
+import { buildCommandDefinitions, registerGuildCommands } from '../lib/discordApi'
 import {
 	handleAssignRoleCommand,
+	handleRoleListCommand,
 	handleStatsCommand,
 	messageResponse,
 	type DiscordInteraction,
 } from '../lib/discordCommands'
 import { verifyDiscordInteraction } from '../lib/discordCrypto'
+import { listRoles } from '../lib/roles'
 import { getSettings } from '../lib/settings'
 import type { Env } from '../types'
 
@@ -64,6 +66,10 @@ discord.post('/interactions', async (c) => {
 			const res = await handleAssignRoleCommand(db, settings, interaction)
 			return c.json(res)
 		}
+		if (name === 'rolelist') {
+			const res = await handleRoleListCommand(db, settings, interaction)
+			return c.json(res)
+		}
 
 		return c.json(messageResponse(`Unknown command: ${name ?? '?'}`, true))
 	}
@@ -73,10 +79,11 @@ discord.post('/interactions', async (c) => {
 
 /**
  * Admin-only registration is mounted from admin.ts.
- * Export helper for admin route to call.
+ * Exports helper for admin route to call.
+ * Rebuilds /assignrole role choices from current website roles table.
  */
 export async function doRegisterCommands(env: Env): Promise<
-	| { ok: true; count: number; guild_id: string }
+	| { ok: true; count: number; guild_id: string; role_choices: number }
 	| { ok: false; error: string; status?: number; body?: string }
 > {
 	const token = env.DISCORD_BOT_TOKEN?.trim()
@@ -95,7 +102,22 @@ export async function doRegisterCommands(env: Env): Promise<
 		}
 	}
 
-	const result = await registerGuildCommands(token, appId, guildId)
+	const excluded = new Set(settings.discord_cmd_assignrole_excluded_role_ids ?? [])
+	let websiteRoles: { id: string; name: string }[] = []
+	try {
+		const roles = await listRoles(db)
+		websiteRoles = roles
+			.filter((r) => !excluded.has(r.id))
+			.map((r) => ({ id: r.id, name: r.name }))
+	} catch (e) {
+		return {
+			ok: false,
+			error: e instanceof Error ? e.message : 'Failed to load website roles',
+		}
+	}
+
+	const commands = buildCommandDefinitions(websiteRoles)
+	const result = await registerGuildCommands(token, appId, guildId, commands)
 	if (!result.ok) {
 		return {
 			ok: false,
@@ -104,7 +126,12 @@ export async function doRegisterCommands(env: Env): Promise<
 			body: result.body,
 		}
 	}
-	return { ok: true, count: result.count, guild_id: guildId }
+	return {
+		ok: true,
+		count: result.count,
+		guild_id: guildId,
+		role_choices: Math.min(websiteRoles.length, 25),
+	}
 }
 
 export default discord

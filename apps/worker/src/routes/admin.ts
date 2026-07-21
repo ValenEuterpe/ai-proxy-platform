@@ -1471,17 +1471,41 @@ function mapAdminSettings(data: Record<string, unknown>) {
 				: Boolean(data.discord_cmd_stats_ephemeral),
 		discord_cmd_assignrole_channel_id: emptySnowflake(data.discord_cmd_assignrole_channel_id),
 		discord_cmd_assignrole_role_id: emptySnowflake(data.discord_cmd_assignrole_role_id),
-		// Website roles.id UUID (not Discord snowflake)
+		// Legacy column; role is chosen per /assignrole via Discord option
 		discord_cmd_assignrole_target_role_id: emptySnowflake(
 			data.discord_cmd_assignrole_target_role_id,
+		),
+		discord_cmd_assignrole_excluded_role_ids: parseUuidIdList(
+			data.discord_cmd_assignrole_excluded_role_ids,
 		),
 		discord_cmd_assignrole_ephemeral:
 			data.discord_cmd_assignrole_ephemeral === undefined ||
 			data.discord_cmd_assignrole_ephemeral === null
 				? true
 				: Boolean(data.discord_cmd_assignrole_ephemeral),
+		discord_cmd_rolelist_channel_id: emptySnowflake(data.discord_cmd_rolelist_channel_id),
+		discord_cmd_rolelist_role_id: emptySnowflake(data.discord_cmd_rolelist_role_id),
+		discord_cmd_rolelist_ephemeral:
+			data.discord_cmd_rolelist_ephemeral === undefined ||
+			data.discord_cmd_rolelist_ephemeral === null
+				? true
+				: Boolean(data.discord_cmd_rolelist_ephemeral),
 		updated_at: data.updated_at as string | undefined,
 	}
+}
+
+const ROLE_UUID_RE =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function parseUuidIdList(v: unknown): string[] {
+	if (!Array.isArray(v)) return []
+	const out: string[] = []
+	for (const item of v) {
+		if (typeof item !== 'string') continue
+		const id = item.trim()
+		if (ROLE_UUID_RE.test(id) && !out.includes(id)) out.push(id)
+	}
+	return out
 }
 
 /**
@@ -1557,7 +1581,11 @@ admin.patch('/settings', async (c) => {
 		discord_cmd_assignrole_channel_id?: string | null
 		discord_cmd_assignrole_role_id?: string | null
 		discord_cmd_assignrole_target_role_id?: string | null
+		discord_cmd_assignrole_excluded_role_ids?: string[] | null
 		discord_cmd_assignrole_ephemeral?: boolean
+		discord_cmd_rolelist_channel_id?: string | null
+		discord_cmd_rolelist_role_id?: string | null
+		discord_cmd_rolelist_ephemeral?: boolean
 	}
 	try {
 		body = await c.req.json()
@@ -1583,6 +1611,9 @@ admin.patch('/settings', async (c) => {
 	}
 	if (typeof body.discord_cmd_assignrole_ephemeral === 'boolean') {
 		patch.discord_cmd_assignrole_ephemeral = body.discord_cmd_assignrole_ephemeral
+	}
+	if (typeof body.discord_cmd_rolelist_ephemeral === 'boolean') {
+		patch.discord_cmd_rolelist_ephemeral = body.discord_cmd_rolelist_ephemeral
 	}
 	if ('required_discord_guild_id' in body) {
 		const v = body.required_discord_guild_id
@@ -1622,6 +1653,8 @@ admin.patch('/settings', async (c) => {
 		'discord_cmd_stats_role_id',
 		'discord_cmd_assignrole_channel_id',
 		'discord_cmd_assignrole_role_id',
+		'discord_cmd_rolelist_channel_id',
+		'discord_cmd_rolelist_role_id',
 	] as const
 	for (const field of snowflakeFields) {
 		if (field in body) {
@@ -1631,44 +1664,50 @@ admin.patch('/settings', async (c) => {
 		}
 	}
 
-	// Website role UUID (roles table), not Discord snowflake
-	if ('discord_cmd_assignrole_target_role_id' in body) {
-		const v = body.discord_cmd_assignrole_target_role_id
-		if (v === null || v === undefined || (typeof v === 'string' && v.trim() === '')) {
-			patch.discord_cmd_assignrole_target_role_id = null
-		} else if (typeof v === 'string') {
-			const id = v.trim()
-			if (
-				!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-					id,
-				)
-			) {
-				return c.json(
-					{
-						error:
-							'discord_cmd_assignrole_target_role_id must be a website role UUID from Admin → Roles, or empty',
-					},
-					400,
-				)
-			}
-			const dbCheck = createServiceClient(c.env)
-			try {
-				const role = await getRoleById(dbCheck, id)
-				if (!role) {
-					return c.json({ error: 'Selected website role does not exist' }, 400)
-				}
-			} catch (e) {
-				return c.json(
-					{ error: e instanceof Error ? e.message : 'Failed to validate website role' },
-					500,
-				)
-			}
-			patch.discord_cmd_assignrole_target_role_id = id
-		} else {
+	if ('discord_cmd_assignrole_excluded_role_ids' in body) {
+		const raw = body.discord_cmd_assignrole_excluded_role_ids
+		if (raw === null || raw === undefined) {
+			patch.discord_cmd_assignrole_excluded_role_ids = []
+		} else if (!Array.isArray(raw)) {
 			return c.json(
-				{ error: 'discord_cmd_assignrole_target_role_id must be a string or null' },
+				{ error: 'discord_cmd_assignrole_excluded_role_ids must be an array of role UUIDs' },
 				400,
 			)
+		} else {
+			const ids = parseUuidIdList(raw)
+			if (ids.length !== raw.filter((x) => x !== null && x !== undefined && String(x).trim() !== '').length) {
+				// allow only valid UUIDs; reject if any non-empty entry failed
+				for (const item of raw) {
+					if (item === null || item === undefined) continue
+					const s = String(item).trim()
+					if (s === '') continue
+					if (!ROLE_UUID_RE.test(s)) {
+						return c.json(
+							{
+								error:
+									'discord_cmd_assignrole_excluded_role_ids must contain only website role UUIDs',
+							},
+							400,
+						)
+					}
+				}
+			}
+			// Validate each id exists in roles table
+			const dbCheck = createServiceClient(c.env)
+			for (const id of ids) {
+				try {
+					const role = await getRoleById(dbCheck, id)
+					if (!role) {
+						return c.json({ error: `Excluded role not found: ${id}` }, 400)
+					}
+				} catch (e) {
+					return c.json(
+						{ error: e instanceof Error ? e.message : 'Failed to validate excluded roles' },
+						500,
+					)
+				}
+			}
+			patch.discord_cmd_assignrole_excluded_role_ids = ids
 		}
 	}
 
@@ -1683,7 +1722,7 @@ admin.patch('/settings', async (c) => {
 	return c.json({ settings: mapAdminSettings(data as Record<string, unknown>) })
 })
 
-/** Register /stats and /assignrole as guild slash commands (uses required_discord_guild_id). */
+/** Register /stats, /assignrole, /rolelist (uses required_discord_guild_id). */
 admin.post('/discord/register-commands', async (c) => {
 	const result = await doRegisterCommands(c.env)
 	if (!result.ok) {
@@ -1700,7 +1739,8 @@ admin.post('/discord/register-commands', async (c) => {
 		ok: true,
 		count: result.count,
 		guild_id: result.guild_id,
-		commands: ['stats', 'assignrole'],
+		role_choices: result.role_choices,
+		commands: ['stats', 'assignrole', 'rolelist'],
 	})
 })
 

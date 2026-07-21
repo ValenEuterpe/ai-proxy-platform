@@ -28,8 +28,11 @@ export default function SettingsPage() {
 	const [statsEphemeral, setStatsEphemeral] = useState(true)
 	const [assignChannelId, setAssignChannelId] = useState('')
 	const [assignRoleId, setAssignRoleId] = useState('')
-	const [assignTargetRoleId, setAssignTargetRoleId] = useState('')
+	const [assignExcludedRoleIds, setAssignExcludedRoleIds] = useState<string[]>([])
 	const [assignEphemeral, setAssignEphemeral] = useState(true)
+	const [rolelistChannelId, setRolelistChannelId] = useState('')
+	const [rolelistRoleId, setRolelistRoleId] = useState('')
+	const [rolelistEphemeral, setRolelistEphemeral] = useState(true)
 	const [registeringCmds, setRegisteringCmds] = useState(false)
 	const [registerMsg, setRegisterMsg] = useState<string | null>(null)
 	const [loading, setLoading] = useState(true)
@@ -87,8 +90,11 @@ export default function SettingsPage() {
 				setStatsEphemeral(r.settings.discord_cmd_stats_ephemeral !== false)
 				setAssignChannelId(r.settings.discord_cmd_assignrole_channel_id ?? '')
 				setAssignRoleId(r.settings.discord_cmd_assignrole_role_id ?? '')
-				setAssignTargetRoleId(r.settings.discord_cmd_assignrole_target_role_id ?? '')
+				setAssignExcludedRoleIds(r.settings.discord_cmd_assignrole_excluded_role_ids ?? [])
 				setAssignEphemeral(r.settings.discord_cmd_assignrole_ephemeral !== false)
+				setRolelistChannelId(r.settings.discord_cmd_rolelist_channel_id ?? '')
+				setRolelistRoleId(r.settings.discord_cmd_rolelist_role_id ?? '')
+				setRolelistEphemeral(r.settings.discord_cmd_rolelist_ephemeral !== false)
 			})
 			.catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'))
 			.finally(() => setLoading(false))
@@ -115,9 +121,13 @@ export default function SettingsPage() {
 				discord_cmd_assignrole_channel_id:
 					assignChannelId.trim() === '' ? null : assignChannelId.trim(),
 				discord_cmd_assignrole_role_id: assignRoleId.trim() === '' ? null : assignRoleId.trim(),
-				discord_cmd_assignrole_target_role_id:
-					assignTargetRoleId.trim() === '' ? null : assignTargetRoleId.trim(),
+				discord_cmd_assignrole_excluded_role_ids: assignExcludedRoleIds,
 				discord_cmd_assignrole_ephemeral: assignEphemeral,
+				discord_cmd_rolelist_channel_id:
+					rolelistChannelId.trim() === '' ? null : rolelistChannelId.trim(),
+				discord_cmd_rolelist_role_id:
+					rolelistRoleId.trim() === '' ? null : rolelistRoleId.trim(),
+				discord_cmd_rolelist_ephemeral: rolelistEphemeral,
 			})
 			setSettings(res.settings)
 			setCsamEnabled(res.settings.csam_scan_enabled !== false)
@@ -130,8 +140,11 @@ export default function SettingsPage() {
 			setStatsEphemeral(res.settings.discord_cmd_stats_ephemeral !== false)
 			setAssignChannelId(res.settings.discord_cmd_assignrole_channel_id ?? '')
 			setAssignRoleId(res.settings.discord_cmd_assignrole_role_id ?? '')
-			setAssignTargetRoleId(res.settings.discord_cmd_assignrole_target_role_id ?? '')
+			setAssignExcludedRoleIds(res.settings.discord_cmd_assignrole_excluded_role_ids ?? [])
 			setAssignEphemeral(res.settings.discord_cmd_assignrole_ephemeral !== false)
+			setRolelistChannelId(res.settings.discord_cmd_rolelist_channel_id ?? '')
+			setRolelistRoleId(res.settings.discord_cmd_rolelist_role_id ?? '')
+			setRolelistEphemeral(res.settings.discord_cmd_rolelist_ephemeral !== false)
 			setSaved(true)
 			setTimeout(() => setSaved(false), 2000)
 		} catch (err) {
@@ -233,7 +246,7 @@ export default function SettingsPage() {
 		try {
 			const res = await api.registerDiscordCommands()
 			setRegisterMsg(
-				`Registered ${res.count} command(s) on guild ${res.guild_id}: ${res.commands.join(', ')}`,
+				`Registered ${res.count} command(s) on guild ${res.guild_id}: ${res.commands.join(', ')} (${res.role_choices} role choice(s) on /assignrole)`,
 			)
 		} catch (err) {
 			setError(err instanceof Error ? err.message : 'Register commands failed')
@@ -470,9 +483,10 @@ export default function SettingsPage() {
 						<div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4 space-y-3">
 							<p className="text-sm font-medium text-white">/assignrole</p>
 							<p className="text-xs text-zinc-500">
-								Discord admins assign a <strong className="font-medium text-zinc-400">website</strong>{' '}
-								proxy role (limits / channel access) to up to 5 users who already registered
-								on the site. This does not change Discord server roles.
+								Pick a website role in Discord (`role` option) and up to 5 users. Always
+								overrides the previous website role. Users must already be registered on the
+								site. After you change roles or exclusions, click Register slash commands so
+								the Discord dropdown updates.
 							</p>
 							<div className="grid gap-3 sm:grid-cols-2">
 								<div>
@@ -497,28 +511,51 @@ export default function SettingsPage() {
 										onChange={(e) => setAssignRoleId(e.target.value)}
 									/>
 								</div>
-								<div className="sm:col-span-2">
-									<label className="block text-xs text-zinc-400 mb-1">
-										Website role to assign
-									</label>
-									<select
-										className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white"
-										value={assignTargetRoleId}
-										onChange={(e) => setAssignTargetRoleId(e.target.value)}
-									>
-										<option value="">— select a role —</option>
-										{roles.map((r) => (
-											<option key={r.id} value={r.id}>
-												{r.name}
-												{r.is_default ? ' (default)' : ''}
-											</option>
-										))}
-									</select>
-									<p className="text-[11px] text-zinc-500 mt-1">
-										From Admin → Roles below. Users must already have logged into the
-										website with Discord.
-									</p>
-								</div>
+							</div>
+							<div>
+								<label className="block text-xs text-zinc-400 mb-1">
+									Website roles to exclude
+								</label>
+								<p className="text-[11px] text-zinc-500 mb-2">
+									Checked roles cannot be assigned via /assignrole (hidden from Discord
+									dropdown after re-register).
+								</p>
+								{rolesLoading ? (
+									<p className="text-xs text-zinc-500">Loading roles…</p>
+								) : roles.length === 0 ? (
+									<p className="text-xs text-zinc-500">No website roles yet.</p>
+								) : (
+									<div className="max-h-40 overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-950 p-2 space-y-1">
+										{roles.map((r) => {
+											const checked = assignExcludedRoleIds.includes(r.id)
+											return (
+												<label
+													key={r.id}
+													className="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-zinc-900 cursor-pointer"
+												>
+													<input
+														type="checkbox"
+														className="h-4 w-4"
+														checked={checked}
+														onChange={() => {
+															setAssignExcludedRoleIds((prev) =>
+																checked
+																	? prev.filter((id) => id !== r.id)
+																	: [...prev, r.id],
+															)
+														}}
+													/>
+													<span className="text-sm text-zinc-200">
+														{r.name}
+														{r.is_default ? (
+															<span className="text-zinc-500"> (default)</span>
+														) : null}
+													</span>
+												</label>
+											)
+										})}
+									</div>
+								)}
 							</div>
 							<label className="flex items-center justify-between gap-4">
 								<span className="text-sm text-zinc-200">Ephemeral reply</span>
@@ -526,6 +563,46 @@ export default function SettingsPage() {
 									type="checkbox"
 									checked={assignEphemeral}
 									onChange={(e) => setAssignEphemeral(e.target.checked)}
+									className="h-4 w-4"
+								/>
+							</label>
+						</div>
+
+						<div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4 space-y-3">
+							<p className="text-sm font-medium text-white">/rolelist</p>
+							<p className="text-xs text-zinc-500">
+								Lists all website proxy roles with RPM / RPD / TPM / TPD limits.
+							</p>
+							<div className="grid gap-3 sm:grid-cols-2">
+								<div>
+									<label className="block text-xs text-zinc-400 mb-1">
+										Channel ID (optional)
+									</label>
+									<input
+										className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white font-mono"
+										placeholder="any channel if empty"
+										value={rolelistChannelId}
+										onChange={(e) => setRolelistChannelId(e.target.value)}
+									/>
+								</div>
+								<div>
+									<label className="block text-xs text-zinc-400 mb-1">
+										Discord runner role ID (optional)
+									</label>
+									<input
+										className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white font-mono"
+										placeholder="any role if empty"
+										value={rolelistRoleId}
+										onChange={(e) => setRolelistRoleId(e.target.value)}
+									/>
+								</div>
+							</div>
+							<label className="flex items-center justify-between gap-4">
+								<span className="text-sm text-zinc-200">Ephemeral reply</span>
+								<input
+									type="checkbox"
+									checked={rolelistEphemeral}
+									onChange={(e) => setRolelistEphemeral(e.target.checked)}
 									className="h-4 w-4"
 								/>
 							</label>
