@@ -61,11 +61,7 @@ discord.post('/interactions', async (c) => {
 			return c.json(res)
 		}
 		if (name === 'assignrole') {
-			const res = await handleAssignRoleCommand(
-				c.env.DISCORD_BOT_TOKEN,
-				settings,
-				interaction,
-			)
+			const res = await handleAssignRoleCommand(db, settings, interaction)
 			return c.json(res)
 		}
 

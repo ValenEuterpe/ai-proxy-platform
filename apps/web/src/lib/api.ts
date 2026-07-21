@@ -235,7 +235,7 @@ export type Settings = {
 	discord_cmd_stats_ephemeral?: boolean
 	discord_cmd_assignrole_channel_id?: string | null
 	discord_cmd_assignrole_role_id?: string | null
-	/** Role the bot grants via /assignrole */
+	/** Website roles.id UUID assigned via /assignrole (not a Discord role) */
 	discord_cmd_assignrole_target_role_id?: string | null
 	discord_cmd_assignrole_ephemeral?: boolean
 	updated_at?: string

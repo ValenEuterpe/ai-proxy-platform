@@ -34,7 +34,7 @@ export function defaultCommandDefinitions(): DiscordCommandDef[] {
 		},
 		{
 			name: 'assignrole',
-			description: 'Assign the configured role to up to 5 users',
+			description: 'Assign the configured website proxy role to up to 5 registered users',
 			options: [
 				{ type: OPT_USER, name: 'user1', description: 'First user', required: true },
 				{ type: OPT_USER, name: 'user2', description: 'Second user', required: false },

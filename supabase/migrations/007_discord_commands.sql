@@ -19,6 +19,7 @@ alter table settings
 alter table settings
   add column if not exists discord_cmd_assignrole_role_id text;
 
+-- Website roles.id (UUID), not a Discord role snowflake
 alter table settings
   add column if not exists discord_cmd_assignrole_target_role_id text;
 

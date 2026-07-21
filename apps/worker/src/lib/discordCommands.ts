@@ -1,12 +1,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { addGuildMemberRole } from './discordApi'
 import {
 	getDailyQuotaWindow,
 	getUserUsageStats,
 	getWindowUsage,
 	sumUserTokens,
 } from './rateLimit'
-import { getUserRoleLimits } from './roles'
+import { getRoleById, getUserRoleLimits } from './roles'
 import type { Settings } from './settings'
 
 export type InteractionMember = {
@@ -225,8 +224,14 @@ export async function handleStatsCommand(
 	}
 }
 
+const UUID_RE =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+/**
+ * /assignrole — sets website app_users.role_id (proxy limits/access), not a Discord server role.
+ */
 export async function handleAssignRoleCommand(
-	botToken: string | undefined,
+	db: SupabaseClient,
 	settings: Settings,
 	interaction: DiscordInteraction,
 ): Promise<ReturnType<typeof messageResponse>> {
@@ -239,22 +244,30 @@ export async function handleAssignRoleCommand(
 	)
 	if (gate) return messageResponse(gate, true)
 
-	const guildId = interaction.guild_id?.trim()
-	if (!guildId) {
+	if (!interaction.guild_id?.trim()) {
 		return messageResponse('This command can only be used in a server.', true)
 	}
 
-	const targetRole = settings.discord_cmd_assignrole_target_role_id?.trim() || null
-	if (!snowflakeOk(targetRole)) {
+	const targetRoleId = settings.discord_cmd_assignrole_target_role_id?.trim() || null
+	if (!targetRoleId || !UUID_RE.test(targetRoleId)) {
 		return messageResponse(
-			'Target role is not configured. Set it in Admin → Settings → Discord Commands.',
+			'Website target role is not configured. Set it in Admin → Settings → Discord Commands (dropdown of site roles).',
 			true,
 		)
 	}
 
-	const token = botToken?.trim()
-	if (!token) {
-		return messageResponse('Bot token is not configured on the worker.', true)
+	let targetRole: Awaited<ReturnType<typeof getRoleById>>
+	try {
+		targetRole = await getRoleById(db, targetRoleId)
+	} catch (e) {
+		console.error('assignrole getRoleById', e)
+		return messageResponse('Failed to load website role. Try again later.', true)
+	}
+	if (!targetRole) {
+		return messageResponse(
+			'Configured website role no longer exists. Pick another role in Admin → Settings.',
+			true,
+		)
 	}
 
 	const ids: string[] = []
@@ -267,14 +280,42 @@ export async function handleAssignRoleCommand(
 	}
 
 	const lines: string[] = []
-	for (const userId of ids) {
-		const label = resolveUserLabel(interaction.data, userId)
-		const result = await addGuildMemberRole(token, guildId, userId, targetRole)
-		if (result.ok) {
-			lines.push(`✅ ${label} — role assigned`)
-		} else {
-			lines.push(`❌ ${label} — failed (${result.status}): ${result.message}`)
+	for (const discordUserId of ids) {
+		const label = resolveUserLabel(interaction.data, discordUserId)
+		const { data: appUser, error: lookErr } = await db
+			.from('app_users')
+			.select('id, role_id, discord_username')
+			.eq('discord_id', discordUserId)
+			.maybeSingle()
+
+		if (lookErr) {
+			console.error('assignrole lookup', lookErr)
+			lines.push(`❌ ${label} — lookup failed`)
+			continue
 		}
+		if (!appUser) {
+			lines.push(
+				`❌ ${label} — not registered on the website (they must log in with Discord first)`,
+			)
+			continue
+		}
+
+		if ((appUser.role_id as string | null) === targetRole.id) {
+			lines.push(`✅ ${label} — already has website role **${targetRole.name}**`)
+			continue
+		}
+
+		const { error: updErr } = await db
+			.from('app_users')
+			.update({ role_id: targetRole.id })
+			.eq('id', appUser.id)
+
+		if (updErr) {
+			console.error('assignrole update', updErr)
+			lines.push(`❌ ${label} — failed to update role`)
+			continue
+		}
+		lines.push(`✅ ${label} — website role set to **${targetRole.name}**`)
 	}
 
 	return messageResponse(lines.join('\n'), ephemeral)

@@ -1471,6 +1471,7 @@ function mapAdminSettings(data: Record<string, unknown>) {
 				: Boolean(data.discord_cmd_stats_ephemeral),
 		discord_cmd_assignrole_channel_id: emptySnowflake(data.discord_cmd_assignrole_channel_id),
 		discord_cmd_assignrole_role_id: emptySnowflake(data.discord_cmd_assignrole_role_id),
+		// Website roles.id UUID (not Discord snowflake)
 		discord_cmd_assignrole_target_role_id: emptySnowflake(
 			data.discord_cmd_assignrole_target_role_id,
 		),
@@ -1483,6 +1484,35 @@ function mapAdminSettings(data: Record<string, unknown>) {
 	}
 }
 
+/**
+ * Normalize Discord snowflake paste: strip whitespace, zero-width chars,
+ * and common mention/link wrappers (<@&id>, <#id>, <@id>, full channel URLs).
+ */
+function normalizeSnowflakeInput(raw: string): string {
+	let s = raw.trim()
+	// zero-width / BOM / nbsp often sneak in from Discord paste
+	s = s.replace(/[\u200B-\u200D\uFEFF\u00A0]/g, '')
+	s = s.trim()
+
+	// <@&roleId> / <@userId> / <@!userId> / <#channelId>
+	const mention = s.match(/^<@!?&?(\d{5,30})>$/)
+	if (mention) return mention[1]
+
+	// https://discord.com/channels/guildId/channelId
+	const channelUrl = s.match(/discord(?:app)?\.com\/channels\/\d+\/(\d{5,30})/i)
+	if (channelUrl) return channelUrl[1]
+
+	// bare id with accidental surrounding punctuation
+	const bare = s.match(/^(\d{5,30})$/)
+	if (bare) return bare[1]
+
+	// last resort: extract longest digit run if the whole string is mostly that id
+	const digits = s.match(/\d{5,30}/)
+	if (digits && s.replace(/\D/g, '') === digits[0]) return digits[0]
+
+	return s
+}
+
 function parseOptionalSnowflake(
 	v: unknown,
 	field: string,
@@ -1493,7 +1523,8 @@ function parseOptionalSnowflake(
 	if (typeof v !== 'string') {
 		return { ok: false, error: `${field} must be a string or null` }
 	}
-	const id = v.trim()
+	const id = normalizeSnowflakeInput(v)
+	if (id === '') return { ok: true, value: null }
 	if (!/^\d{5,30}$/.test(id)) {
 		return {
 			ok: false,
@@ -1591,13 +1622,53 @@ admin.patch('/settings', async (c) => {
 		'discord_cmd_stats_role_id',
 		'discord_cmd_assignrole_channel_id',
 		'discord_cmd_assignrole_role_id',
-		'discord_cmd_assignrole_target_role_id',
 	] as const
 	for (const field of snowflakeFields) {
 		if (field in body) {
 			const parsed = parseOptionalSnowflake(body[field], field)
 			if (!parsed.ok) return c.json({ error: parsed.error }, 400)
 			patch[field] = parsed.value
+		}
+	}
+
+	// Website role UUID (roles table), not Discord snowflake
+	if ('discord_cmd_assignrole_target_role_id' in body) {
+		const v = body.discord_cmd_assignrole_target_role_id
+		if (v === null || v === undefined || (typeof v === 'string' && v.trim() === '')) {
+			patch.discord_cmd_assignrole_target_role_id = null
+		} else if (typeof v === 'string') {
+			const id = v.trim()
+			if (
+				!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+					id,
+				)
+			) {
+				return c.json(
+					{
+						error:
+							'discord_cmd_assignrole_target_role_id must be a website role UUID from Admin → Roles, or empty',
+					},
+					400,
+				)
+			}
+			const dbCheck = createServiceClient(c.env)
+			try {
+				const role = await getRoleById(dbCheck, id)
+				if (!role) {
+					return c.json({ error: 'Selected website role does not exist' }, 400)
+				}
+			} catch (e) {
+				return c.json(
+					{ error: e instanceof Error ? e.message : 'Failed to validate website role' },
+					500,
+				)
+			}
+			patch.discord_cmd_assignrole_target_role_id = id
+		} else {
+			return c.json(
+				{ error: 'discord_cmd_assignrole_target_role_id must be a string or null' },
+				400,
+			)
 		}
 	}
 
