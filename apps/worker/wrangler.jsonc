@@ -10,7 +10,8 @@
 	"compatibility_flags": ["nodejs_compat"],
 	// Set secrets via: wrangler secret put <NAME>
 	// SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, OWNER_LOGIN, OWNER_PASSWORD, SESSION_SECRET
-	// Optional: DISCORD_BOT_TOKEN (guild membership gate when required_discord_guild_id is set)
+	// Optional Discord: DISCORD_BOT_TOKEN, DISCORD_PUBLIC_KEY, DISCORD_APPLICATION_ID
+	//   (guild gate + slash commands at POST /api/discord/interactions)
 	// Optional non-secret for local CORS (also set in .dev.vars):
 	"vars": {
 		"CORS_ORIGIN": "https://brunway.pages.dev"

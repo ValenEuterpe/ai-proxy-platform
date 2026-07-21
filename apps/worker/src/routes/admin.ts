@@ -26,6 +26,7 @@ import {
 } from '../lib/roles'
 import { getSettings, invalidateSettingsCache } from '../lib/settings'
 import type { Env } from '../types'
+import { doRegisterCommands } from './discord'
 
 const admin = new Hono<{ Bindings: Env }>()
 
@@ -1434,6 +1435,13 @@ admin.delete('/roles/:id', async (c) => {
 // Rate limits live on roles; settings holds proxy toggles + optional Discord gate.
 // DB columns requests_per_* are left intact (not dropped) for safety.
 
+function emptySnowflake(v: unknown): string | null {
+	if (v === null || v === undefined) return null
+	if (typeof v !== 'string') return null
+	const s = v.trim()
+	return s === '' ? null : s
+}
+
 function mapAdminSettings(data: Record<string, unknown>) {
 	const guild =
 		typeof data.required_discord_guild_id === 'string'
@@ -1454,8 +1462,45 @@ function mapAdminSettings(data: Record<string, unknown>) {
 				? true
 				: Boolean(data.csam_scan_enabled),
 		csam_action: csamAction as 'log' | 'log_and_block',
+		discord_commands_enabled: Boolean(data.discord_commands_enabled),
+		discord_cmd_stats_channel_id: emptySnowflake(data.discord_cmd_stats_channel_id),
+		discord_cmd_stats_role_id: emptySnowflake(data.discord_cmd_stats_role_id),
+		discord_cmd_stats_ephemeral:
+			data.discord_cmd_stats_ephemeral === undefined || data.discord_cmd_stats_ephemeral === null
+				? true
+				: Boolean(data.discord_cmd_stats_ephemeral),
+		discord_cmd_assignrole_channel_id: emptySnowflake(data.discord_cmd_assignrole_channel_id),
+		discord_cmd_assignrole_role_id: emptySnowflake(data.discord_cmd_assignrole_role_id),
+		discord_cmd_assignrole_target_role_id: emptySnowflake(
+			data.discord_cmd_assignrole_target_role_id,
+		),
+		discord_cmd_assignrole_ephemeral:
+			data.discord_cmd_assignrole_ephemeral === undefined ||
+			data.discord_cmd_assignrole_ephemeral === null
+				? true
+				: Boolean(data.discord_cmd_assignrole_ephemeral),
 		updated_at: data.updated_at as string | undefined,
 	}
+}
+
+function parseOptionalSnowflake(
+	v: unknown,
+	field: string,
+): { ok: true; value: string | null } | { ok: false; error: string } {
+	if (v === null || v === undefined || (typeof v === 'string' && v.trim() === '')) {
+		return { ok: true, value: null }
+	}
+	if (typeof v !== 'string') {
+		return { ok: false, error: `${field} must be a string or null` }
+	}
+	const id = v.trim()
+	if (!/^\d{5,30}$/.test(id)) {
+		return {
+			ok: false,
+			error: `${field} must be a Discord snowflake ID (digits only) or empty`,
+		}
+	}
+	return { ok: true, value: id }
 }
 
 admin.get('/settings', async (c) => {
@@ -1474,6 +1519,14 @@ admin.patch('/settings', async (c) => {
 		discord_invite_url?: string | null
 		csam_scan_enabled?: boolean
 		csam_action?: 'log' | 'log_and_block'
+		discord_commands_enabled?: boolean
+		discord_cmd_stats_channel_id?: string | null
+		discord_cmd_stats_role_id?: string | null
+		discord_cmd_stats_ephemeral?: boolean
+		discord_cmd_assignrole_channel_id?: string | null
+		discord_cmd_assignrole_role_id?: string | null
+		discord_cmd_assignrole_target_role_id?: string | null
+		discord_cmd_assignrole_ephemeral?: boolean
 	}
 	try {
 		body = await c.req.json()
@@ -1490,6 +1543,15 @@ admin.patch('/settings', async (c) => {
 			return c.json({ error: "csam_action must be 'log' or 'log_and_block'" }, 400)
 		}
 		patch.csam_action = body.csam_action
+	}
+	if (typeof body.discord_commands_enabled === 'boolean') {
+		patch.discord_commands_enabled = body.discord_commands_enabled
+	}
+	if (typeof body.discord_cmd_stats_ephemeral === 'boolean') {
+		patch.discord_cmd_stats_ephemeral = body.discord_cmd_stats_ephemeral
+	}
+	if (typeof body.discord_cmd_assignrole_ephemeral === 'boolean') {
+		patch.discord_cmd_assignrole_ephemeral = body.discord_cmd_assignrole_ephemeral
 	}
 	if ('required_discord_guild_id' in body) {
 		const v = body.required_discord_guild_id
@@ -1524,6 +1586,21 @@ admin.patch('/settings', async (c) => {
 		}
 	}
 
+	const snowflakeFields = [
+		'discord_cmd_stats_channel_id',
+		'discord_cmd_stats_role_id',
+		'discord_cmd_assignrole_channel_id',
+		'discord_cmd_assignrole_role_id',
+		'discord_cmd_assignrole_target_role_id',
+	] as const
+	for (const field of snowflakeFields) {
+		if (field in body) {
+			const parsed = parseOptionalSnowflake(body[field], field)
+			if (!parsed.ok) return c.json({ error: parsed.error }, 400)
+			patch[field] = parsed.value
+		}
+	}
+
 	if (Object.keys(patch).length <= 1) {
 		return c.json({ error: 'No valid fields to update' }, 400)
 	}
@@ -1533,6 +1610,27 @@ admin.patch('/settings', async (c) => {
 	if (error) return c.json({ error: error.message }, 500)
 	invalidateSettingsCache()
 	return c.json({ settings: mapAdminSettings(data as Record<string, unknown>) })
+})
+
+/** Register /stats and /assignrole as guild slash commands (uses required_discord_guild_id). */
+admin.post('/discord/register-commands', async (c) => {
+	const result = await doRegisterCommands(c.env)
+	if (!result.ok) {
+		return c.json(
+			{
+				error: result.error,
+				status: result.status,
+				body: result.body,
+			},
+			result.status && result.status >= 400 && result.status < 600 ? 502 : 400,
+		)
+	}
+	return c.json({
+		ok: true,
+		count: result.count,
+		guild_id: result.guild_id,
+		commands: ['stats', 'assignrole'],
+	})
 })
 
 export default admin

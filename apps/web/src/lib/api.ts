@@ -228,6 +228,16 @@ export type Settings = {
 	csam_scan_enabled?: boolean
 	/** log = flag only; log_and_block = flag + HTTP 400 */
 	csam_action?: CsamAction
+	/** Discord slash commands master switch */
+	discord_commands_enabled?: boolean
+	discord_cmd_stats_channel_id?: string | null
+	discord_cmd_stats_role_id?: string | null
+	discord_cmd_stats_ephemeral?: boolean
+	discord_cmd_assignrole_channel_id?: string | null
+	discord_cmd_assignrole_role_id?: string | null
+	/** Role the bot grants via /assignrole */
+	discord_cmd_assignrole_target_role_id?: string | null
+	discord_cmd_assignrole_ephemeral?: boolean
 	updated_at?: string
 }
 
@@ -524,6 +534,16 @@ export const api = {
 		request<{ settings: Settings }>('/api/admin/settings', {
 			method: 'PATCH',
 			json: body,
+		}),
+
+	registerDiscordCommands: () =>
+		request<{
+			ok: boolean
+			count: number
+			guild_id: string
+			commands: string[]
+		}>('/api/admin/discord/register-commands', {
+			method: 'POST',
 		}),
 
 	userEnsure: (accessToken: string) =>

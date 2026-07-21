@@ -3,6 +3,7 @@ import { cors } from 'hono/cors'
 import { createServiceClient } from './lib/db'
 import admin from './routes/admin'
 import { adminAuth, userAuth } from './routes/auth'
+import discord from './routes/discord'
 import publicRoutes from './routes/public'
 import proxy from './routes/proxy'
 import type { Env } from './types'
@@ -52,6 +53,7 @@ app.route('/api/admin', adminAuth)
 app.route('/api/admin', admin)
 app.route('/api/user', userAuth)
 app.route('/api/public', publicRoutes)
+app.route('/api/discord', discord)
 app.route('/v1', proxy)
 
 app.notFound((c) => c.json({ error: 'Not found' }, 404))

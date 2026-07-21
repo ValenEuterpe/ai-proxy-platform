@@ -22,6 +22,16 @@ export default function SettingsPage() {
 	const [csamAction, setCsamAction] = useState<CsamAction>('log')
 	const [guildId, setGuildId] = useState('')
 	const [inviteUrl, setInviteUrl] = useState('')
+	const [discordCmdsEnabled, setDiscordCmdsEnabled] = useState(false)
+	const [statsChannelId, setStatsChannelId] = useState('')
+	const [statsRoleId, setStatsRoleId] = useState('')
+	const [statsEphemeral, setStatsEphemeral] = useState(true)
+	const [assignChannelId, setAssignChannelId] = useState('')
+	const [assignRoleId, setAssignRoleId] = useState('')
+	const [assignTargetRoleId, setAssignTargetRoleId] = useState('')
+	const [assignEphemeral, setAssignEphemeral] = useState(true)
+	const [registeringCmds, setRegisteringCmds] = useState(false)
+	const [registerMsg, setRegisterMsg] = useState<string | null>(null)
 	const [loading, setLoading] = useState(true)
 	const [saving, setSaving] = useState(false)
 	const [error, setError] = useState<string | null>(null)
@@ -71,6 +81,14 @@ export default function SettingsPage() {
 				setCsamAction(r.settings.csam_action === 'log_and_block' ? 'log_and_block' : 'log')
 				setGuildId(r.settings.required_discord_guild_id ?? '')
 				setInviteUrl(r.settings.discord_invite_url ?? '')
+				setDiscordCmdsEnabled(Boolean(r.settings.discord_commands_enabled))
+				setStatsChannelId(r.settings.discord_cmd_stats_channel_id ?? '')
+				setStatsRoleId(r.settings.discord_cmd_stats_role_id ?? '')
+				setStatsEphemeral(r.settings.discord_cmd_stats_ephemeral !== false)
+				setAssignChannelId(r.settings.discord_cmd_assignrole_channel_id ?? '')
+				setAssignRoleId(r.settings.discord_cmd_assignrole_role_id ?? '')
+				setAssignTargetRoleId(r.settings.discord_cmd_assignrole_target_role_id ?? '')
+				setAssignEphemeral(r.settings.discord_cmd_assignrole_ephemeral !== false)
 			})
 			.catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'))
 			.finally(() => setLoading(false))
@@ -90,12 +108,30 @@ export default function SettingsPage() {
 				csam_action: csamAction,
 				required_discord_guild_id: guildId.trim() === '' ? null : guildId.trim(),
 				discord_invite_url: inviteUrl.trim() === '' ? null : inviteUrl.trim(),
+				discord_commands_enabled: discordCmdsEnabled,
+				discord_cmd_stats_channel_id: statsChannelId.trim() === '' ? null : statsChannelId.trim(),
+				discord_cmd_stats_role_id: statsRoleId.trim() === '' ? null : statsRoleId.trim(),
+				discord_cmd_stats_ephemeral: statsEphemeral,
+				discord_cmd_assignrole_channel_id:
+					assignChannelId.trim() === '' ? null : assignChannelId.trim(),
+				discord_cmd_assignrole_role_id: assignRoleId.trim() === '' ? null : assignRoleId.trim(),
+				discord_cmd_assignrole_target_role_id:
+					assignTargetRoleId.trim() === '' ? null : assignTargetRoleId.trim(),
+				discord_cmd_assignrole_ephemeral: assignEphemeral,
 			})
 			setSettings(res.settings)
 			setCsamEnabled(res.settings.csam_scan_enabled !== false)
 			setCsamAction(res.settings.csam_action === 'log_and_block' ? 'log_and_block' : 'log')
 			setGuildId(res.settings.required_discord_guild_id ?? '')
 			setInviteUrl(res.settings.discord_invite_url ?? '')
+			setDiscordCmdsEnabled(Boolean(res.settings.discord_commands_enabled))
+			setStatsChannelId(res.settings.discord_cmd_stats_channel_id ?? '')
+			setStatsRoleId(res.settings.discord_cmd_stats_role_id ?? '')
+			setStatsEphemeral(res.settings.discord_cmd_stats_ephemeral !== false)
+			setAssignChannelId(res.settings.discord_cmd_assignrole_channel_id ?? '')
+			setAssignRoleId(res.settings.discord_cmd_assignrole_role_id ?? '')
+			setAssignTargetRoleId(res.settings.discord_cmd_assignrole_target_role_id ?? '')
+			setAssignEphemeral(res.settings.discord_cmd_assignrole_ephemeral !== false)
 			setSaved(true)
 			setTimeout(() => setSaved(false), 2000)
 		} catch (err) {
@@ -187,6 +223,22 @@ export default function SettingsPage() {
 			await loadRoles()
 		} catch (err) {
 			setRoleError(err instanceof Error ? err.message : 'Delete failed')
+		}
+	}
+
+	async function registerDiscordCommands() {
+		setRegisteringCmds(true)
+		setRegisterMsg(null)
+		setError(null)
+		try {
+			const res = await api.registerDiscordCommands()
+			setRegisterMsg(
+				`Registered ${res.count} command(s) on guild ${res.guild_id}: ${res.commands.join(', ')}`,
+			)
+		} catch (err) {
+			setError(err instanceof Error ? err.message : 'Register commands failed')
+		} finally {
+			setRegisteringCmds(false)
 		}
 	}
 
@@ -338,6 +390,148 @@ export default function SettingsPage() {
 						<p className="text-[11px] text-zinc-500 mt-1">
 							Shown on the disabled account screen so users can join.
 						</p>
+					</div>
+				</div>
+
+				<div className="border-t border-zinc-800 pt-5 space-y-5">
+					<div>
+						<h3 className="text-sm font-medium text-white">Discord commands</h3>
+						<p className="text-xs text-zinc-500 mt-1">
+							Slash commands handled by the Worker at{' '}
+							<span className="font-mono">/api/discord/interactions</span>. Requires secrets{' '}
+							<span className="font-mono">DISCORD_BOT_TOKEN</span>,{' '}
+							<span className="font-mono">DISCORD_PUBLIC_KEY</span>,{' '}
+							<span className="font-mono">DISCORD_APPLICATION_ID</span>, bot invited with{' '}
+							<span className="font-mono">applications.commands</span> + Manage Roles, and
+							Interactions Endpoint URL pointing at your site. Guild registration uses the
+							server ID above.
+						</p>
+					</div>
+
+					<label className="flex items-center justify-between gap-4">
+						<span>
+							<span className="block text-sm text-white">Enable Discord commands</span>
+							<span className="text-xs text-zinc-500">
+								When off, interactions reply that commands are disabled.
+							</span>
+						</span>
+						<input
+							type="checkbox"
+							checked={discordCmdsEnabled}
+							onChange={(e) => setDiscordCmdsEnabled(e.target.checked)}
+							className="h-4 w-4"
+						/>
+					</label>
+
+					<div
+						className={`space-y-5 ${discordCmdsEnabled ? '' : 'opacity-50 pointer-events-none'}`}
+					>
+						<div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4 space-y-3">
+							<p className="text-sm font-medium text-white">/stats</p>
+							<p className="text-xs text-zinc-500">
+								Shows personal proxy usage. Optional user argument looks up that Discord
+								user; unregistered users get a clear message.
+							</p>
+							<div className="grid gap-3 sm:grid-cols-2">
+								<div>
+									<label className="block text-xs text-zinc-400 mb-1">
+										Channel ID (optional)
+									</label>
+									<input
+										className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white font-mono"
+										placeholder="any channel if empty"
+										value={statsChannelId}
+										onChange={(e) => setStatsChannelId(e.target.value)}
+									/>
+								</div>
+								<div>
+									<label className="block text-xs text-zinc-400 mb-1">
+										Required role ID (optional)
+									</label>
+									<input
+										className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white font-mono"
+										placeholder="any role if empty"
+										value={statsRoleId}
+										onChange={(e) => setStatsRoleId(e.target.value)}
+									/>
+								</div>
+							</div>
+							<label className="flex items-center justify-between gap-4">
+								<span className="text-sm text-zinc-200">Ephemeral reply</span>
+								<input
+									type="checkbox"
+									checked={statsEphemeral}
+									onChange={(e) => setStatsEphemeral(e.target.checked)}
+									className="h-4 w-4"
+								/>
+							</label>
+						</div>
+
+						<div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4 space-y-3">
+							<p className="text-sm font-medium text-white">/assignrole</p>
+							<p className="text-xs text-zinc-500">
+								Admin tool: assign the target role to up to 5 users (user1…user5). Bot role
+								must be above the target role and have Manage Roles.
+							</p>
+							<div className="grid gap-3 sm:grid-cols-2">
+								<div>
+									<label className="block text-xs text-zinc-400 mb-1">
+										Channel ID (optional)
+									</label>
+									<input
+										className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white font-mono"
+										placeholder="any channel if empty"
+										value={assignChannelId}
+										onChange={(e) => setAssignChannelId(e.target.value)}
+									/>
+								</div>
+								<div>
+									<label className="block text-xs text-zinc-400 mb-1">
+										Runner role ID (optional)
+									</label>
+									<input
+										className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white font-mono"
+										placeholder="who may run the command"
+										value={assignRoleId}
+										onChange={(e) => setAssignRoleId(e.target.value)}
+									/>
+								</div>
+								<div className="sm:col-span-2">
+									<label className="block text-xs text-zinc-400 mb-1">
+										Target role ID (assigned)
+									</label>
+									<input
+										className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white font-mono"
+										placeholder="role the bot grants"
+										value={assignTargetRoleId}
+										onChange={(e) => setAssignTargetRoleId(e.target.value)}
+									/>
+								</div>
+							</div>
+							<label className="flex items-center justify-between gap-4">
+								<span className="text-sm text-zinc-200">Ephemeral reply</span>
+								<input
+									type="checkbox"
+									checked={assignEphemeral}
+									onChange={(e) => setAssignEphemeral(e.target.checked)}
+									className="h-4 w-4"
+								/>
+							</label>
+						</div>
+
+						<div className="flex flex-wrap items-center gap-3">
+							<button
+								type="button"
+								disabled={registeringCmds}
+								onClick={() => void registerDiscordCommands()}
+								className="rounded-lg border border-zinc-600 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 px-3 py-2 text-sm text-white"
+							>
+								{registeringCmds ? 'Registering…' : 'Register slash commands'}
+							</button>
+							{registerMsg && (
+								<span className="text-xs text-emerald-400">{registerMsg}</span>
+							)}
+						</div>
 					</div>
 				</div>
 

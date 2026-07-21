@@ -5,8 +5,12 @@ export type Env = {
 	OWNER_PASSWORD: string
 	SESSION_SECRET: string
 	CORS_ORIGIN?: string
-	/** Bot token for optional Discord guild membership gate (wrangler secret). */
+	/** Bot token for guild gate + slash commands (wrangler secret). */
 	DISCORD_BOT_TOKEN?: string
+	/** Discord application public key (hex) for interaction signature verify. */
+	DISCORD_PUBLIC_KEY?: string
+	/** Discord application ID (for registering guild slash commands). */
+	DISCORD_APPLICATION_ID?: string
 }
 
 export type Role = {

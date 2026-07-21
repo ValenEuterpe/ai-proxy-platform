@@ -4,3 +4,7 @@ OWNER_LOGIN=admin
 OWNER_PASSWORD=change-me
 SESSION_SECRET=generate-a-long-random-string
 CORS_ORIGIN=http://localhost:5173
+# Optional Discord bot (guild gate + slash commands)
+# DISCORD_BOT_TOKEN=
+# DISCORD_PUBLIC_KEY=
+# DISCORD_APPLICATION_ID=
