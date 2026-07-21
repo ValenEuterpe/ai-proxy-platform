@@ -1,0 +1,3 @@
+# SPA fallback only.
+# /api, /v1, /health are handled by Pages Functions (functions/*) → Worker.
+/*    /index.html   200

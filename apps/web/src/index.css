@@ -1,0 +1,53 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-bg: #0f1117;
+  --color-surface: #18181b80;
+  --color-surface-solid: #18181b;
+  --color-elevated: #09090b;
+  --color-border: #27272a;
+  --color-border-strong: #3f3f46;
+  --color-text: #ffffff;
+  --color-text-secondary: #e5e7eb;
+  --color-muted: #a1a1aa;
+  --color-faint: #71717a;
+  --color-accent: #7c3aed;
+  --color-accent-hover: #8b5cf6;
+  --color-accent-soft: #8b5cf6;
+  --color-discord: #5865f2;
+  --color-discord-hover: #4752c4;
+  --color-success: #34d399;
+  --color-warn: #fbbf24;
+  --color-danger: #f87171;
+  --color-danger-bg: #450a0a66;
+  --color-danger-border: #7f1d1d80;
+  --font-sans: system-ui, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --radius-card: 0.75rem;
+  --radius-control: 0.5rem;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: var(--font-sans);
+  background: var(--color-bg);
+  color: var(--color-text-secondary);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* Native date inputs on dark admin UI */
+input.date-input {
+  color-scheme: dark;
+  color: #fff;
+  cursor: pointer;
+}
+
+input.date-input::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.85;
+  filter: invert(1);
+}

@@ -1,0 +1,21 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "ai-proxy-worker",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-07-13",
+	"observability": {
+		"enabled": true
+	},
+	"upload_source_maps": true,
+	"compatibility_flags": ["nodejs_compat"],
+	// Set secrets via: wrangler secret put <NAME>
+	// SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, OWNER_LOGIN, OWNER_PASSWORD, SESSION_SECRET
+	// Optional: DISCORD_BOT_TOKEN (guild membership gate when required_discord_guild_id is set)
+	// Optional non-secret for local CORS (also set in .dev.vars):
+	"vars": {
+		"CORS_ORIGIN": "https://brunway.pages.dev"
+	},
+	"triggers": {
+		"crons": ["0 * * * *"]
+	}
+}
